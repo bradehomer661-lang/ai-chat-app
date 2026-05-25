@@ -1,1 +1,54 @@
+name: 自动部署到 Cloudflare Pages + 自动子域名
 
+on:
+  push:
+    branches: [ main ]  # 员工生成代码后推送到 main 就触发
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装依赖 & 构建
+        run: |
+          npm install
+          npm run build  # Codex 生成的项目通用命令
+
+      - name: 获取员工用户名（自动分配子域名用）
+        id: username
+        run: echo "USERNAME=${GITHUB_ACTOR}" >> "$GITHUB_OUTPUT"
+
+      - name: 部署到 Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          projectName: ${{ steps.username.outputs.USERNAME }}-app
+          directory: dist  # 构建输出目录（Codex 默认一般是 dist/build/out）
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 自动配置 Cloudflare 子域名
+        uses: fischerscode/cloudflare-dns-action@v2
+        with:
+          token: ${{ secrets.CF_API_TOKEN }}
+          zone: ${{ secrets.CF_ZONE_ID }}
+          records: |
+            [
+              {
+                "type": "CNAME",
+                "name": "${{ steps.username.outputs.USERNAME }}.app",
+                "content": "${{ steps.username.outputs.USERNAME }}-app.pages.dev",
+                "ttl": 1,
+                "proxied": true
+              }
+            ]
